@@ -1,0 +1,186 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+#include <pthread.h>
+#include <semaphore.h>
+#include <string.h>
+
+/* BUFFER */
+
+char** buffer;
+
+/* SEMAFOROS */
+
+sem_t sem_hayhuecobuffer;
+sem_t sem_haydatobuffer;
+sem_t sem_mutexbuffer;
+
+
+/* Genera un numero aleatorio entre 0 y 100000 */
+
+int randomf(){
+    int num = rand()%100000+1;
+    return num;
+}
+
+/* Comprueba si un numero es primo (1) o no (0) */
+
+int prime(int num1){
+    int is_prime=1;
+    int i = 2;
+    printf("Number: ");
+    while( i<=num1/2 && is_prime==1 ) {
+        printf("%i ", i);
+        if(i%30==0){
+            printf("\n");
+        }
+        if(num1 % i == 0 ) {
+                is_prime = 0;
+        }
+        i++;
+    }
+    printf("\n");
+    if(is_prime){
+            printf("%i is number prime\n", num1);
+    }else{
+             printf("NO is prime %i\n",num1);
+    }
+    return is_prime;
+}
+
+
+/* Hilos productores inicial */
+
+void* productor(void* z)
+{
+    // Nnumeros dado por el usuario
+    int* x = (int*) z;
+    int tamBuffer = (int) *x; //tamaño buffer recibido como argumento
+	char tmp[200];
+
+	for(int i=0;i<50;i++){ //50 datos creados
+		int num = randomf();
+		sem_wait(&sem_hayhuecobuffer);
+
+        sprintf(buffer[i%tamBuffer],"%d",num);
+
+		sem_wait(&sem_mutexbuffer);
+		if(prime(buffer[i%tamBuffer]) == 1){
+			sprintf(tmp,"El numero %s es primo\n",buffer[i%tamBuffer]);
+		}else{
+			sprintf(tmp,"El numero %s NO es primo\n",buffer[i%tamBuffer]);
+		}
+		sem_post(&sem_mutexbuffer);
+		sem_post(&sem_haydatobuffer);
+	}
+	pthread_exit(NULL);
+}
+
+
+/* Hilo consumidor final. z es un puntero al archivo donde se guardan los datos */
+
+void* consumidor_final(void* z)
+{
+	FILE* file = (FILE*)z; //nombre de archivo dado por el usuario
+    int i;
+    for (i=0; i<50; i++){ //50 numeros creados
+		sem_wait(&sem_haydatobuffer);
+		fprintf(file,"%s",buffer[i% 5]);
+		sem_post(&sem_hayhuecobuffer);
+	}
+	fclose(file);
+	pthread_exit(NULL);
+}
+
+int main(int argc, char** argv)
+{
+	/* Iniciar variables */
+	srand(time(NULL));
+
+
+	/* Comprobacion de los argumentos */
+	if(argc != 4){
+		fprintf(stderr,"Numero de argumentos incorrectos\n");
+		return -1;
+	}
+
+	/* Coger los datos dados por el usuario */
+	int Nhilos = atoi(argv[1]); //dado por el usuario la cantidad de hilos
+	if(Nhilos <= 0){
+		fprintf(stderr,"Especifica un numero de hilos productores correcto\n");
+		return -2;
+	}
+
+//	int Nnumeros = atoi(argv[2]); //dado por el usuario la cantidad de numeros
+	//if(Nnumeros <= 0){
+		//fprintf(stderr,"Especifica un numero de datos a producir\n");
+		//return -2;
+	//}
+
+    int tamBuffer = atoi(argv[2]); //dado por el usuario el tamaño del buffer
+	if(tamBuffer <= 0){
+		fprintf(stderr,"Especifica un numero de tamano de buffer correcto\n");
+		return -2;
+	}
+
+	/* Apertura de fichero */
+	FILE* file = fopen("fichero.txt","w");
+	if(file == NULL){
+		fprintf(stderr,"Imposible abrir fichero en modo escritura\n");
+		return -4;
+	}
+
+	/* reservar memoria para el buffer */
+	buffer = (char**)malloc(tamBuffer*sizeof(char*));
+	if(buffer == NULL){
+		fprintf(stderr,"Error en la reserva de memoria\n");
+		return -5;
+	}
+	for(int i=0;i<tamBuffer;i++){
+		buffer[i] = (char*) malloc(4*sizeof(char));
+		if(buffer[i] == NULL){
+			fprintf(stderr,"Error en la reserva de memoria\n");
+			return -5;
+		}
+	}
+
+	pthread_t* prod;
+	pthread_t consum_final;
+
+	/* Inicializar semaforos */
+	sem_init(&sem_hayhuecobuffer,0,tamBuffer);
+	sem_init(&sem_haydatobuffer,0,0);
+    sem_init(&sem_mutexbuffer,0,1);
+
+	consum_final = (pthread_t*)malloc(1*sizeof(pthread_t));
+	if(consum_final == NULL){
+		fprintf(stderr,"Error en la reserva de memoria\n");
+		return -5;
+	}
+
+
+	/* Lanzar hilos */
+	for(int i=0;i<Nhilos;i++){ //crear varios hilos productores
+		pthread_create(&prod[i],NULL,productor,(void*)&tamBuffer);
+	}
+
+	pthread_create(&consum_final,NULL,consumidor_final, &file); //crea el hilo consumidor
+
+
+	/* Espera a que termine el hilo final y despues los hilos productores*/
+	pthread_join(consum_final,NULL);
+	for(int i=0;i<Nhilos;i++){
+		pthread_join(prod[i],NULL);
+	}
+
+
+	/* Liberar recursos */
+	free(consum_final);
+
+	for(int i=0;i<tamBuffer;i++){
+		free(buffer[i]);
+	}
+	free(buffer);
+
+	return 0;
+}
